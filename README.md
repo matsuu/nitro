@@ -22,12 +22,13 @@ Next include nitro in your application.
 Somewhere near the beginning of your application (or where you want to
 begin profiling) call
 
-    timer := nitro.Initialize()
+    timer := nitro.Start("name of start")
 
 Then throughout your application wherever a major division of work is
 call
 
     timer.Step("name of step")
+    timer.Stop("name of stop")
 
 ### Flags
 
@@ -52,7 +53,7 @@ a flagset:
     var Timer *nitro.B
 
     func init() {
-        Timer = nitro.Initalize()
+        Timer = nitro.Start()
     }
 
     func TrackMe() {

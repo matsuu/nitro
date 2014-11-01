@@ -17,16 +17,17 @@
 //
 // Example:
 //	import "github.com/spf13/nitro"
-//	timer := nitro.Initialize()
+//	timer := nitro.Start()
 //	prepTemplates()
 //	timer.Step("initialize & template prep")
 //	CreatePages()
-//	timer.Step("import pages")
+//	timer.Stop("import pages")
 package nitro
 
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"time"
@@ -37,12 +38,20 @@ var memStats runtime.MemStats
 
 var AnalysisOn = false
 
+var initialTime time.Time
+var writer io.Writer
+
+func init() {
+	flag.BoolVar(&AnalysisOn, "stepAnalysis", false, "display memory and timing of different steps of the program")
+	initialTime = time.Now()
+	writer = os.Stdout
+}
+
 type B struct {
-	initialTime time.Time // Time entire process started
-	start       time.Time // Time step started
-	duration    time.Duration
-	timerOn     bool
-	result      R
+	start    time.Time // Time step started
+	duration time.Duration
+	timerOn  bool
+	title    string
 	// The initial states of memStats.Mallocs and memStats.TotalAlloc.
 	startAllocs uint64
 	startBytes  uint64
@@ -93,23 +102,19 @@ func (b *B) resetTimer() {
 	b.netBytes = 0
 }
 
-// Call this first to get the performance object
-// Should be called at the top of your function.
-func Initialize() *B {
-	flag.BoolVar(&AnalysisOn, "stepAnalysis", false, "display memory and timing of different steps of the program")
+func SetWriter(w io.Writer) {
+	writer = w
+}
 
+func Start(title string) *B {
+	if !AnalysisOn {
+		return nil
+	}
 	b := &B{}
-	b.initialTime = time.Now()
-	runtime.GC()
+	b.title = title
 	b.resetTimer()
 	b.startTimer()
 	return b
-}
-
-// Simple wrapper for Initialize
-// Maintain for legacy purposes
-func Initalize() *B {
-	return Initialize()
 }
 
 // Call perf.Step("step name") at each step in your
@@ -121,15 +126,28 @@ func (b *B) Step(str string) {
 	}
 
 	b.stopTimer()
-	fmt.Println(str + ":")
-	fmt.Println(b.results().toString())
+	b.write(str)
 
 	b.resetTimer()
 	b.startTimer()
 }
 
+func (b *B) Stop(str string) {
+	if !AnalysisOn {
+		return
+	}
+
+	b.stopTimer()
+	b.write(str)
+}
+
+func (b *B) write(str string) {
+	writer.Write([]byte(str + ":\n"))
+	writer.Write([]byte(b.results().toString()))
+}
+
 func (b *B) results() R {
-	return R{time.Since(b.initialTime), b.duration, b.netAllocs, b.netBytes}
+	return R{time.Since(initialTime), b.duration, b.netAllocs, b.netBytes}
 }
 
 type R struct {
@@ -157,5 +175,5 @@ func byteToMb(b uint64) float64 {
 func (r R) toString() string {
 	time := fmt.Sprintf("%v (%5v)\t", r.T, r.C)
 	mem := fmt.Sprintf("%7.2f MB \t%v Allocs", byteToMb(r.MemBytes), r.MemAllocs)
-	return fmt.Sprintf("\t%s %s", time, mem)
+	return fmt.Sprintf("\t%s %s\n", time, mem)
 }
