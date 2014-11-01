@@ -38,20 +38,20 @@ var memStats runtime.MemStats
 
 var AnalysisOn = false
 
-var initialTime time.Time
+var condition func() bool
 var writer io.Writer
 
 func init() {
 	flag.BoolVar(&AnalysisOn, "stepAnalysis", false, "display memory and timing of different steps of the program")
-	initialTime = time.Now()
+	condition = func() bool { return true }
 	writer = os.Stdout
 }
 
 type B struct {
+	initial  time.Time
 	start    time.Time // Time step started
 	duration time.Duration
 	timerOn  bool
-	title    string
 	// The initial states of memStats.Mallocs and memStats.TotalAlloc.
 	startAllocs uint64
 	startBytes  uint64
@@ -102,6 +102,10 @@ func (b *B) resetTimer() {
 	b.netBytes = 0
 }
 
+func SetCondition(c func() bool) {
+	condition = c
+}
+
 func SetWriter(w io.Writer) {
 	writer = w
 }
@@ -110,8 +114,12 @@ func Start(title string) *B {
 	if !AnalysisOn {
 		return nil
 	}
+	if !condition() {
+		return nil
+	}
 	b := &B{}
-	b.title = title
+	b.initial = time.Now()
+	b.writeHeader(title)
 	b.resetTimer()
 	b.startTimer()
 	return b
@@ -122,6 +130,9 @@ func Start(title string) *B {
 // Measures time spent since last Step call.
 func (b *B) Step(str string) {
 	if !AnalysisOn {
+		return
+	}
+	if b == nil {
 		return
 	}
 
@@ -136,18 +147,25 @@ func (b *B) Stop(str string) {
 	if !AnalysisOn {
 		return
 	}
+	if b == nil {
+		return
+	}
 
 	b.stopTimer()
 	b.write(str)
 }
 
+func (b *B) writeHeader(str string) {
+	fmt.Fprintf(writer, "%9s\t%9s\t%9s\t%9s\t%s\n", "during", "total", "memBytes", "memAllocs", str)
+}
+
 func (b *B) write(str string) {
-	writer.Write([]byte(str + ":\n"))
-	writer.Write([]byte(b.results().toString()))
+	r := b.results()
+	fmt.Fprintf(writer, "%9d\t%9d\t%9d\t%9v\t%s\n", r.T*time.Nanosecond, r.C*time.Nanosecond, r.MemBytes, r.MemAllocs, str)
 }
 
 func (b *B) results() R {
-	return R{time.Since(initialTime), b.duration, b.netAllocs, b.netBytes}
+	return R{time.Since(b.initial), b.duration, b.netAllocs, b.netBytes}
 }
 
 type R struct {
@@ -155,25 +173,4 @@ type R struct {
 	T         time.Duration // The total time taken.
 	MemAllocs uint64        // The total number of memory allocations.
 	MemBytes  uint64        // The total number of bytes allocated.
-}
-
-func (r R) mbPerSec() float64 {
-	if r.MemBytes <= 0 || r.T <= 0 {
-		return 0
-	}
-
-	return byteToMb(r.MemBytes) / r.T.Seconds()
-}
-
-func byteToMb(b uint64) float64 {
-	if b <= 0 {
-		return 0
-	}
-	return float64(b) / 1e6
-}
-
-func (r R) toString() string {
-	time := fmt.Sprintf("%v (%5v)\t", r.T, r.C)
-	mem := fmt.Sprintf("%7.2f MB \t%v Allocs", byteToMb(r.MemBytes), r.MemAllocs)
-	return fmt.Sprintf("\t%s %s\n", time, mem)
 }
